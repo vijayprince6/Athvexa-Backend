@@ -10,7 +10,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/rankings")
-@CrossOrigin(origins = "http://localhost:3000")
+@CrossOrigin(origins = "*")
 public class RankingController {
     
     @Autowired
@@ -57,7 +57,7 @@ public class RankingController {
             UserDTO ranking = rankingService.getUserRanking(userId);
             return ResponseEntity.ok(ranking);
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(null);
+            return ResponseEntity.notFound().build();
         }
     }
     
