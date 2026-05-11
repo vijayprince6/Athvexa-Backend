@@ -12,7 +12,6 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/auth")
-@CrossOrigin(origins = "http://localhost:3000")
 public class AuthController {
     
     @Autowired
@@ -25,11 +24,18 @@ public class AuthController {
         try {
             User newUser = userService.createUser(user);
             return ResponseEntity.ok(Map.of(
-                "message", "User registered successfully",
+                "message", "Account created successfully! Please login to continue.",
                 "userId", newUser.getId().toString()
             ));
         } catch (RuntimeException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            String msg = e.getMessage();
+            if (msg != null && msg.contains("Email already exists")) {
+                return ResponseEntity.status(409).body(Map.of(
+                    "error", "An account with this email already exists. Please login instead.",
+                    "errorCode", "EMAIL_EXISTS"
+                ));
+            }
+            return ResponseEntity.badRequest().body(Map.of("error", msg));
         }
     }
     
@@ -41,7 +47,6 @@ public class AuthController {
             
             System.out.println("=== FRONTEND LOGIN ATTEMPT ===");
             System.out.println("Email: " + email);
-            System.out.println("Password: " + password);
             System.out.println("Credentials: " + credentials);
             
             // Find user by email
@@ -49,7 +54,6 @@ public class AuthController {
                 .orElseThrow(() -> new RuntimeException("User not found"));
             
             System.out.println("User found: " + user.getEmail());
-            System.out.println("Stored password: " + user.getPassword());
             
             // Verify password using UserService for consistency
             boolean matches = userService.verifyPassword(password, user.getPassword());
@@ -73,12 +77,23 @@ public class AuthController {
             response.put("occupationName", user.getOccupationName() != null ? user.getOccupationName() : "");
             response.put("bio", user.getBio() != null ? user.getBio() : "");
             
-            System.out.println("=== LOGIN SUCCESS RESPONSE ===");
-            System.out.println("Response: " + response);
-            
+            System.out.println("=== LOGIN SUCCESS ===");
             return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Invalid credentials"));
+            
+        } catch (RuntimeException e) {
+            System.out.println("Login error: " + e.getMessage());
+            if ("User not found".equals(e.getMessage())) {
+                return ResponseEntity.status(404).body(Map.of(
+                    "error", "No account found with this email. Please register first.",
+                    "errorCode", "USER_NOT_FOUND"
+                ));
+            } else if ("Invalid password".equals(e.getMessage())) {
+                return ResponseEntity.status(401).body(Map.of(
+                    "error", "Incorrect password. Please check your password and try again.",
+                    "errorCode", "WRONG_PASSWORD"
+                ));
+            }
+            return ResponseEntity.badRequest().body(Map.of("error", "Login failed. Please try again."));
         }
     }
     
