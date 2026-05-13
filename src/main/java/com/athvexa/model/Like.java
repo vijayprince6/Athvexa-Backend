@@ -24,6 +24,9 @@ public class Like {
     
     @Column(name = "post_id")
     private Long postId;
+
+    @Column(name = "user_uuid")
+    private java.util.UUID userUuid;
     
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "post_id", insertable = false, updatable = false)

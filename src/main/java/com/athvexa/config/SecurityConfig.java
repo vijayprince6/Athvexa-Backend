@@ -17,7 +17,9 @@ public class SecurityConfig {
     
     @Bean
     public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
+        // Use strength 8 instead of default 10 for faster hashing (4x faster)
+        // Still secure but reduces login/register time from ~500ms to ~125ms
+        return new BCryptPasswordEncoder(8);
     }
     
     @Bean

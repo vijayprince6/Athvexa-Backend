@@ -16,42 +16,52 @@ public class PostController {
     
     @Autowired
     private PostService postService;
-
-    @Autowired
-    private com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     
     @PostMapping("/create")
     public ResponseEntity<?> createPost(
             @RequestParam("userId") String userId,
-            @RequestPart("post") String postJson,
+            @RequestParam("description") String description,
+            @RequestParam("sport") String sport,
+            @RequestParam("achievementLevel") String achievementLevel,
+            @RequestParam("position") String position,
             @RequestPart(value = "image", required = false) MultipartFile image) {
         try {
             if (image == null || image.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "An image is required to share an achievement!"));
             }
-            // Log the received JSON for debugging
-            System.out.println("Received postJson: " + postJson);
             
-            // Parse post JSON manually to ensure all fields are mapped correctly
-            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(postJson);
+            // Log for debugging
+            System.out.println("Creating post for user: " + userId);
+            System.out.println("Sport: " + sport + ", Level: " + achievementLevel + ", Position: " + position);
+            
             Post post = new Post();
+            post.setDescription(description);
+            post.setSport(sport);
+            post.setPosition(position);
             
-            if (node.has("description")) post.setDescription(node.get("description").asText());
-            if (node.has("sport")) post.setSport(node.get("sport").asText());
-            if (node.has("achievementLevel")) {
-                String levelStr = node.get("achievementLevel").asText();
-                // Map the string to the enum
-                for (Post.AchievementLevel level : Post.AchievementLevel.values()) {
-                    if (level.getDisplayName().equalsIgnoreCase(levelStr) || level.name().equalsIgnoreCase(levelStr)) {
-                        post.setAchievementLevel(level);
-                        break;
-                    }
+            // Map the string to the enum more robustly
+            boolean levelSet = false;
+            for (Post.AchievementLevel level : Post.AchievementLevel.values()) {
+                if (level.name().equalsIgnoreCase(achievementLevel) || 
+                    level.getDisplayName().equalsIgnoreCase(achievementLevel) ||
+                    achievementLevel.toLowerCase().contains(level.name().toLowerCase().split("_")[0])) {
+                    post.setAchievementLevel(level);
+                    levelSet = true;
+                    break;
                 }
             }
-            if (node.has("position")) post.setPosition(node.get("position").asText());
             
-            // Log the parsed post object
-            System.out.println("Parsed Post: " + post);
+            // Fallback for frontend values like 'district', 'state', etc.
+            if (!levelSet) {
+                if (achievementLevel.equalsIgnoreCase("district")) post.setAchievementLevel(Post.AchievementLevel.DISTRICT_LEVEL);
+                else if (achievementLevel.equalsIgnoreCase("state")) post.setAchievementLevel(Post.AchievementLevel.STATE_LEVEL);
+                else if (achievementLevel.equalsIgnoreCase("national")) post.setAchievementLevel(Post.AchievementLevel.NATIONAL_LEVEL);
+                else if (achievementLevel.equalsIgnoreCase("international")) post.setAchievementLevel(Post.AchievementLevel.INTERNATIONAL_LEVEL);
+                else if (achievementLevel.equalsIgnoreCase("school")) post.setAchievementLevel(Post.AchievementLevel.LOCAL_LEVEL);
+                else if (achievementLevel.equalsIgnoreCase("college")) post.setAchievementLevel(Post.AchievementLevel.LOCAL_LEVEL);
+                else if (achievementLevel.equalsIgnoreCase("club")) post.setAchievementLevel(Post.AchievementLevel.LOCAL_LEVEL);
+                else post.setAchievementLevel(Post.AchievementLevel.LOCAL_LEVEL);
+            }
             
             Post createdPost = postService.createPost(userId, post, image);
             return ResponseEntity.ok(Map.of(
@@ -59,40 +69,47 @@ public class PostController {
                 "postId", createdPost.getId()
             ));
         } catch (Exception e) {
+            e.printStackTrace();
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
     
     @GetMapping("/all")
-    public ResponseEntity<List<Post>> getAllPosts(@RequestParam(value = "currentUserId", required = false) String currentUserId) {
-        List<Post> posts = postService.getAllPosts(currentUserId);
-        return ResponseEntity.ok(posts);
+    public ResponseEntity<?> getAllPosts(@RequestParam(value = "currentUserId", required = false) String currentUserId) {
+        try {
+            List<Post> posts = postService.getAllPosts(currentUserId);
+            return ResponseEntity.ok(posts);
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(java.util.Map.of("message", "Error fetching posts: " + e.getMessage()));
+        }
     }
     
     @GetMapping("/user/{userId}")
-    public ResponseEntity<List<Post>> getUserPosts(
+    public ResponseEntity<?> getUserPosts(
             @PathVariable String userId,
             @RequestParam(value = "currentUserId", required = false) String currentUserId) {
-        List<Post> posts = postService.getUserPosts(userId);
-        // Map liked status if currentUserId is provided
-        if (currentUserId != null) {
-            for (Post post : posts) {
-                post.setLikedByUser(postService.getLikeCount(post.getId()) > 0); // Simplified check for now
-                // Actually, let's use the same logic as getAllPosts if possible, but keep it simple for now
-            }
+        try {
+            List<Post> posts = postService.getUserPosts(userId, currentUserId);
+            return ResponseEntity.ok(posts);
+        } catch (Exception e) {
+            System.err.println("Error fetching user posts: " + e.getMessage());
+            return ResponseEntity.status(500).body(Map.of("message", "Error loading posts: " + e.getMessage()));
         }
-        return ResponseEntity.ok(posts);
     }
     
     @GetMapping("/sport/{sport}")
-    public ResponseEntity<List<Post>> getPostsBySport(@PathVariable String sport) {
-        List<Post> posts = postService.getPostsBySport(sport);
+    public ResponseEntity<List<Post>> getPostsBySport(
+            @PathVariable String sport,
+            @RequestParam(value = "currentUserId", required = false) String currentUserId) {
+        List<Post> posts = postService.getPostsBySport(sport, currentUserId);
         return ResponseEntity.ok(posts);
     }
     
     @GetMapping("/{postId}")
-    public ResponseEntity<Post> getPostById(@PathVariable Long postId) {
-        return postService.getPostById(postId)
+    public ResponseEntity<Post> getPostById(
+            @PathVariable Long postId,
+            @RequestParam(value = "currentUserId", required = false) String currentUserId) {
+        return postService.getPostById(postId, currentUserId)
                 .map(post -> ResponseEntity.ok(post))
                 .orElse(ResponseEntity.notFound().build());
     }

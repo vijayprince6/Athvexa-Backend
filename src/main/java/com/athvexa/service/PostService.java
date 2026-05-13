@@ -26,37 +26,10 @@ public class PostService {
     @Autowired
     private UserService userService;
 
-    @Autowired
-    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
-    @jakarta.annotation.PostConstruct
-    public void init() {
-        // List of statements to clean up old schema constraints
-        String[] cleanUpStatements = {
-            "ALTER TABLE posts DROP COLUMN IF EXISTS achievement_level CASCADE",
-            "ALTER TABLE posts DROP CONSTRAINT IF EXISTS posts_position_check",
-            "ALTER TABLE posts DROP CONSTRAINT IF EXISTS posts_achievement_level_check",
-            "ALTER TABLE posts DROP CONSTRAINT IF EXISTS posts_level_of_achievement_check",
-            "ALTER TABLE likes DROP CONSTRAINT IF EXISTS likes_user_id_post_id_key",
-            "ALTER TABLE likes DROP CONSTRAINT IF EXISTS unique_user_post_like",
-            "ALTER TABLE likes DROP COLUMN IF EXISTS user_id CASCADE",
-            "ALTER TABLE likes ADD COLUMN user_id bigint",
-            "ALTER TABLE likes ADD CONSTRAINT unique_user_post_like UNIQUE (user_id, post_id)",
-            "DELETE FROM posts WHERE image_url IS NULL OR image_url = ''",
-            "TRUNCATE TABLE likes CASCADE",
-            "UPDATE posts SET likes_count = 0"
-        };
 
-        for (String sql : cleanUpStatements) {
-            try {
-                jdbcTemplate.execute(sql);
-                System.out.println("Executed: " + sql);
-            } catch (Exception e) {
-                System.out.println("Note: Could not execute [" + sql + "]: " + e.getMessage());
-            }
-        }
-        System.out.println("Schema cleanup completed.");
-    }
+    // Initial cleanup is no longer needed
+    // Removed @PostConstruct init() method that was deleting posts and truncating likes
     
     public Post createPost(String userId, Post post, MultipartFile image) throws Exception {
         User user = userRepository.findById(Long.parseLong(userId))
@@ -88,14 +61,47 @@ public class PostService {
     private com.athvexa.repository.LikeRepository likeRepository;
 
     public List<Post> getAllPosts(String currentUserId) {
-        List<Post> posts = postRepository.findAllByOrderByCreatedAtDesc();
-        if (currentUserId != null) {
-            Long uId = Long.parseLong(currentUserId);
-            for (Post post : posts) {
-                post.setLikedByUser(likeRepository.findByUserIdAndPostId(uId, post.getId()) != null);
+        try {
+            System.out.println("DEBUG: Fetching all posts. currentUserId: " + currentUserId);
+            List<Post> posts = postRepository.findAllByOrderByCreatedAtDesc();
+            System.out.println("DEBUG: Found " + posts.size() + " posts in database");
+            
+            Long uId = null;
+            if (currentUserId != null && !currentUserId.isEmpty() && !currentUserId.equals("null") && !currentUserId.equals("undefined")) {
+                try {
+                    uId = Long.parseLong(currentUserId);
+                } catch (NumberFormatException e) {
+                    System.err.println("DEBUG: Invalid currentUserId format: " + currentUserId);
+                }
             }
+
+            // Optimization: Fetch all liked post IDs for this user in one query
+            java.util.Set<Long> likedPostIds = new java.util.HashSet<>();
+            if (uId != null) {
+                likedPostIds.addAll(likeRepository.findPostIdsByUserId(uId));
+            }
+
+            for (Post post : posts) {
+                try {
+                    // Check for likes using the optimized set
+                    if (uId != null) {
+                        post.setLikedByUser(likedPostIds.contains(post.getId()));
+                    }
+                    
+                    // Defensive check: if user is missing but userId is present
+                    if (post.getUser() == null && post.getUserId() != null) {
+                        System.err.println("DEBUG: Post " + post.getId() + " has userId " + post.getUserId() + " but user entity is null");
+                    }
+                } catch (Exception postEx) {
+                    System.err.println("DEBUG: Error processing post " + post.getId() + ": " + postEx.getMessage());
+                }
+            }
+            return posts;
+        } catch (Exception e) {
+            System.err.println("CRITICAL ERROR in getAllPosts: " + e.getMessage());
+            e.printStackTrace();
+            return new java.util.ArrayList<>(); 
         }
-        return posts;
     }
 
     public List<Post> getAllPosts() {
@@ -103,15 +109,79 @@ public class PostService {
     }
     
     public List<Post> getUserPosts(String userId) {
-        return postRepository.findByUserIdOrderByCreatedAtDesc(Long.parseLong(userId));
+        return getUserPosts(userId, null);
+    }
+    
+    public List<Post> getUserPosts(String userId, String currentUserId) {
+        try {
+            Long targetId = Long.parseLong(userId);
+            System.out.println("DEBUG: Fetching posts for user: " + targetId);
+            List<Post> posts = postRepository.findByUserIdOrderByCreatedAtDesc(targetId);
+            System.out.println("DEBUG: Found " + posts.size() + " posts for user " + targetId);
+            
+            Long uId = null;
+            if (currentUserId != null && !currentUserId.isEmpty() && !currentUserId.equals("null") && !currentUserId.equals("undefined")) {
+                try {
+                    uId = Long.parseLong(currentUserId);
+                } catch (NumberFormatException e) {
+                    // Ignore
+                }
+            }
+
+            if (uId != null && !posts.isEmpty()) {
+                java.util.Set<Long> likedPostIds = new java.util.HashSet<>(likeRepository.findPostIdsByUserId(uId));
+                for (Post post : posts) {
+                    post.setLikedByUser(likedPostIds.contains(post.getId()));
+                }
+            }
+            return posts;
+        } catch (NumberFormatException e) {
+            System.err.println("DEBUG: Invalid userId format for getUserPosts: " + userId);
+            return new java.util.ArrayList<>();
+        } catch (Exception e) {
+            System.err.println("DEBUG: Error in getUserPosts: " + e.getMessage());
+            e.printStackTrace();
+            throw e;
+        }
     }
     
     public List<Post> getPostsBySport(String sport) {
-        return postRepository.findBySportOrderByPointsDesc(sport);
+        return getPostsBySport(sport, null);
+    }
+    
+    public List<Post> getPostsBySport(String sport, String currentUserId) {
+        List<Post> posts = postRepository.findBySportOrderByPointsDesc(sport);
+        
+        Long uId = null;
+        if (currentUserId != null && !currentUserId.isEmpty() && !currentUserId.equals("null") && !currentUserId.equals("undefined")) {
+            try {
+                uId = Long.parseLong(currentUserId);
+            } catch (NumberFormatException e) {
+                // Ignore invalid currentUserId
+            }
+        }
+
+        if (uId != null && !posts.isEmpty()) {
+            java.util.Set<Long> likedPostIds = new java.util.HashSet<>(likeRepository.findPostIdsByUserId(uId));
+            for (Post post : posts) {
+                post.setLikedByUser(likedPostIds.contains(post.getId()));
+            }
+        }
+        return posts;
     }
     
     public Optional<Post> getPostById(Long postId) {
-        return postRepository.findById(postId);
+        return getPostById(postId, null);
+    }
+    
+    public Optional<Post> getPostById(Long postId, String currentUserId) {
+        Optional<Post> postOpt = postRepository.findById(postId);
+        if (postOpt.isPresent() && currentUserId != null) {
+            Post post = postOpt.get();
+            Long uId = Long.parseLong(currentUserId);
+            post.setLikedByUser(likeRepository.findByUserIdAndPostId(uId, post.getId()) != null);
+        }
+        return postOpt;
     }
     
     public void deletePost(Long postId, String userId) {

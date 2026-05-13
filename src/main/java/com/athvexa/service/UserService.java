@@ -24,14 +24,12 @@ public class UserService {
         }
         
         // Auto-generate username from email if not provided
-        String generatedUsername = user.getEmail().split("@")[0];
-        String finalUsername = generatedUsername;
-        int counter = 1;
-        while (userRepository.existsByUsername(finalUsername)) {
-            finalUsername = generatedUsername + counter;
-            counter++;
+        // Use timestamp suffix for faster generation (no loop needed)
+        if (user.getUsername() == null || user.getUsername().isEmpty()) {
+            String baseUsername = user.getEmail().split("@")[0].replaceAll("[^a-zA-Z0-9]", "");
+            String timestamp = String.valueOf(System.currentTimeMillis() % 10000); // Last 4 digits
+            user.setUsername(baseUsername + timestamp);
         }
-        user.setUsername(finalUsername);
         
         // Set default name to avoid constraint violation
         if (user.getName() == null) {

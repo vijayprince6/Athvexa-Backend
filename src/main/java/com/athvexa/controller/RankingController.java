@@ -7,6 +7,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 
 @RestController
 @RequestMapping("/api/rankings")
@@ -17,9 +19,19 @@ public class RankingController {
     private RankingService rankingService;
     
     @GetMapping("/all")
-    public ResponseEntity<List<UserDTO>> getAllRankings() {
-        List<UserDTO> rankings = rankingService.getAllRankings();
-        return ResponseEntity.ok(rankings);
+    public ResponseEntity<?> getAllRankings() {
+        try {
+            List<UserDTO> rankings = rankingService.getAllRankings();
+            return ResponseEntity.ok(rankings);
+        } catch (Exception e) {
+            e.printStackTrace(); // This prints to your terminal logs
+            Map<String, Object> error = new HashMap<>();
+            error.put("status", 500);
+            error.put("message", "Internal Server Error in RankingController");
+            error.put("details", e.getMessage());
+            error.put("exceptionType", e.getClass().getName());
+            return ResponseEntity.status(500).body(error);
+        }
     }
     
     @GetMapping("/sport/{sport}")

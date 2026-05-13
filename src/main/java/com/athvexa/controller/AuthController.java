@@ -23,10 +23,22 @@ public class AuthController {
     public ResponseEntity<?> registerUser(@RequestBody User user) {
         try {
             User newUser = userService.createUser(user);
-            return ResponseEntity.ok(Map.of(
-                "message", "Account created successfully! Please login to continue.",
-                "userId", newUser.getId().toString()
-            ));
+            
+            // Return full user data for immediate auto-login
+            Map<String, Object> response = new HashMap<>();
+            response.put("message", "Account created successfully!");
+            response.put("userId", newUser.getId().toString());
+            response.put("email", newUser.getEmail());
+            response.put("name", newUser.getName() != null ? newUser.getName() : "");
+            response.put("username", newUser.getUsername() != null ? newUser.getUsername() : "");
+            response.put("fullName", newUser.getFullName() != null ? newUser.getFullName() : "");
+            response.put("dateOfBirth", newUser.getDateOfBirth() != null ? newUser.getDateOfBirth() : "");
+            response.put("gender", newUser.getGender() != null ? newUser.getGender() : "");
+            response.put("occupation", newUser.getOccupation() != null ? newUser.getOccupation() : "");
+            response.put("occupationName", newUser.getOccupationName() != null ? newUser.getOccupationName() : "");
+            response.put("bio", newUser.getBio() != null ? newUser.getBio() : "");
+            
+            return ResponseEntity.ok(response);
         } catch (RuntimeException e) {
             String msg = e.getMessage();
             if (msg != null && msg.contains("Email already exists")) {

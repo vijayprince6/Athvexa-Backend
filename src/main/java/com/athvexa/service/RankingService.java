@@ -9,7 +9,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -23,47 +27,155 @@ public class RankingService {
     private PostRepository postRepository;
 
     public List<UserDTO> getAllRankings() {
-        List<User> users = userRepository.findUsersWithPointsOrderByPointsDesc();
-        return users.stream().map(this::convertToUserDTO).collect(Collectors.toList());
+        try {
+            List<User> users = userRepository.findUsersWithPointsOrderByPointsDesc();
+            if (users.isEmpty()) return Collections.emptyList();
+
+            // Super-Link Logic: Exhaustive search for sports
+            List<Post> allPosts = postRepository.findAll();
+            Map<Long, List<String>> userSportsMap = new HashMap<>();
+            
+            if (allPosts != null) {
+                for (Post p : allPosts) {
+                    Long uid = p.getUserId();
+                    // Double-check relationship if direct ID is null
+                    if (uid == null && p.getUser() != null) {
+                        uid = p.getUser().getId();
+                    }
+                    
+                    if (uid != null) {
+                        String sportName = p.getSport();
+                        if (sportName != null && !sportName.trim().isEmpty()) {
+                            String formattedSport = formatSportName(sportName);
+                            userSportsMap.computeIfAbsent(uid, k -> new ArrayList<>()).add(formattedSport);
+                        }
+                    }
+                }
+            }
+
+            return users.stream()
+                    .filter(user -> user != null)
+                    .map(user -> {
+                        UserDTO dto = UserDTO.fromEntity(user);
+                        Long userId = user.getId();
+                        
+                        // Try to get sports from our pre-built map
+                        List<String> sports = userSportsMap.getOrDefault(userId, new ArrayList<>())
+                                .stream().distinct().collect(Collectors.toList());
+                        
+                        // Fallback: If map is empty but user has points, do a direct lookup as a last resort
+                        if (sports.isEmpty() && user.getTotalPoints() != null && user.getTotalPoints() > 0) {
+                            List<Post> userPosts = postRepository.findByUserIdOrderByCreatedAtDesc(userId);
+                            sports = userPosts.stream()
+                                    .map(p -> formatSportName(p.getSport()))
+                                    .filter(s -> !s.equals("General"))
+                                    .distinct()
+                                    .collect(Collectors.toList());
+                        }
+                        
+                        dto.setSport(sports.isEmpty() ? "General" : String.join(", ", sports));
+                        return dto;
+                    })
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            System.err.println("Error in getAllRankings: " + e.getMessage());
+            throw e;
+        }
     }
 
     public List<UserDTO> getRankingsBySport(String sport) {
-        List<Post> posts = postRepository.findBySportOrderByPointsDesc(sport);
+        try {
+            List<Post> posts = postRepository.findBySportOrderByPointsDesc(sport);
 
-        return posts.stream()
-                .map(Post::getUser)
-                .distinct()
-                .filter(user -> user.getTotalPoints() != null && user.getTotalPoints() > 0)
-                .map(this::convertToUserDTO)
-                .collect(Collectors.toList());
+            // Even when filtering by sport, we should show the actual sport name from the posts
+            // to handle casing differences or multiple sports
+            return posts.stream()
+                    .map(Post::getUser)
+                    .filter(user -> user != null)
+                    .distinct()
+                    .filter(user -> user.getTotalPoints() != null && user.getTotalPoints() > 0)
+                    .map(user -> {
+                        UserDTO dto = UserDTO.fromEntity(user);
+                        return populateSports(dto, user.getId());
+                    })
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            System.err.println("Error in getRankingsBySport: " + e.getMessage());
+            throw e;
+        }
+    }
+
+    private String formatSportName(String sport) {
+        if (sport == null || sport.trim().isEmpty()) return "General";
+        
+        String s = sport.trim();
+        if (s.equalsIgnoreCase("tabletennis")) return "Table Tennis";
+        if (s.equalsIgnoreCase("athletics")) return "Athletics";
+        if (s.equalsIgnoreCase("icehockey")) return "Ice Hockey";
+        if (s.equalsIgnoreCase("horseriding")) return "Horse Riding";
+        if (s.equalsIgnoreCase("basketball")) return "Basketball";
+        if (s.equalsIgnoreCase("badminton")) return "Badminton";
+        if (s.equalsIgnoreCase("football")) return "Football";
+        if (s.equalsIgnoreCase("cricket")) return "Cricket";
+        if (s.equalsIgnoreCase("volleyball")) return "Volleyball";
+        if (s.equalsIgnoreCase("handball")) return "Handball";
+        if (s.equalsIgnoreCase("kabaddi")) return "Kabaddi";
+        
+        if (s.length() < 2) return s.toUpperCase();
+        
+        // Default capitalization: First letter upper, rest lower
+        return s.substring(0, 1).toUpperCase() + s.substring(1).toLowerCase();
     }
 
     public List<UserDTO> getRankingsByOccupation(String occupation) {
         return userRepository.findUsersByOccupationWithPointsOrderByPointsDesc(occupation)
                 .stream()
-                .map(this::convertToUserDTO)
+                .filter(user -> user != null)
+                .map(user -> {
+                    UserDTO dto = UserDTO.fromEntity(user);
+                    return populateSports(dto, user.getId());
+                })
                 .collect(Collectors.toList());
     }
 
     public List<UserDTO> getRankingsByOccupationAndGender(String occupation, String gender) {
         return userRepository.findUsersByOccupationAndGenderWithPointsOrderByPointsDesc(occupation, gender)
                 .stream()
-                .map(this::convertToUserDTO)
+                .filter(user -> user != null)
+                .map(user -> {
+                    UserDTO dto = UserDTO.fromEntity(user);
+                    return populateSports(dto, user.getId());
+                })
                 .collect(Collectors.toList());
     }
 
     public List<UserDTO> getRankingsByGender(String gender) {
         return userRepository.findUsersWithPointsOrderByPointsDesc()
                 .stream()
-                .filter(user -> gender.equalsIgnoreCase(user.getGender()))
-                .map(this::convertToUserDTO)
+                .filter(user -> user != null && gender.equalsIgnoreCase(user.getGender()))
+                .map(user -> {
+                    UserDTO dto = UserDTO.fromEntity(user);
+                    return populateSports(dto, user.getId());
+                })
                 .collect(Collectors.toList());
+    }
+
+    private UserDTO populateSports(UserDTO dto, Long userId) {
+        List<String> sports = postRepository.findByUserIdOrderByCreatedAtDesc(userId)
+                .stream()
+                .map(p -> formatSportName(p.getSport()))
+                .filter(s -> s != null && !s.isEmpty())
+                .distinct()
+                .collect(Collectors.toList());
+        dto.setSport(sports.isEmpty() ? "General" : String.join(", ", sports));
+        return dto;
     }
 
     public UserDTO getUserRanking(String userId) {
         User user = userRepository.findById(Long.parseLong(userId))
                 .orElseThrow(() -> new RuntimeException("User not found"));
-        return convertToUserDTO(user);
+        UserDTO dto = UserDTO.fromEntity(user);
+        return populateSports(dto, user.getId());
     }
 
     public Integer getUserRankPosition(String userId) {
@@ -100,22 +212,5 @@ public class RankingService {
             user.setTotalPoints(newPoints);
             userRepository.save(user);
         }
-    }
-
-    private UserDTO convertToUserDTO(User user) {
-        UserDTO dto = new UserDTO();
-        dto.setId(user.getId());
-        dto.setEmail(user.getEmail());
-        dto.setName(user.getName());
-        dto.setUsername(user.getUsername());
-        dto.setDateOfBirth(user.getDateOfBirth());
-        dto.setGender(user.getGender());
-        dto.setOccupation(user.getOccupation());
-        dto.setOccupationName(user.getOccupationName());
-        dto.setProfileImageUrl(user.getProfileImageUrl());
-        dto.setTotalPoints(user.getTotalPoints());
-        dto.setIsActive(user.getIsActive());
-        dto.setPostCount(0);
-        return dto;
     }
 }

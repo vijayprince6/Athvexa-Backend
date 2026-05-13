@@ -74,6 +74,12 @@ public class User implements UserDetails {
     @Column(name = "total_points")
     private Integer totalPoints = 0;
     
+    @Column(name = "followers_count")
+    private Integer followersCount = 0;
+    
+    @Column(name = "following_count")
+    private Integer followingCount = 0;
+    
     @Column(name = "is_active")
     private Boolean isActive = true;
     

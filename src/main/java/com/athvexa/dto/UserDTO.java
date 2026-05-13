@@ -24,6 +24,7 @@ public class UserDTO {
     private Integer totalPoints;
     private Boolean isActive;
     private Integer postCount;
+    private String sport;
     
     public static UserDTO fromEntity(User user) {
         UserDTO dto = new UserDTO();
