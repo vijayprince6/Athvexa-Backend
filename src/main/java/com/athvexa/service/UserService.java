@@ -70,6 +70,20 @@ public class UserService {
         user.setProfileImageUrl(userDetails.getProfileImageUrl());
         user.setBio(userDetails.getBio());
         
+        // Handle coach-specific fields
+        if (userDetails.getRole() != null) {
+            user.setRole(userDetails.getRole());
+        }
+        if (userDetails.getSport() != null) {
+            user.setSport(userDetails.getSport());
+        }
+        if (userDetails.getAcademyName() != null) {
+            user.setAcademyName(userDetails.getAcademyName());
+        }
+        if (userDetails.getExperience() != null) {
+            user.setExperience(userDetails.getExperience());
+        }
+        
         return userRepository.save(user);
     }
     

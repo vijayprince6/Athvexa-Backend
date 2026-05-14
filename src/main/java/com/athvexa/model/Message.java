@@ -25,11 +25,11 @@ public class Message {
     @Column(name = "receiver_id")
     private Long receiverId;
     
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "sender_id", insertable = false, updatable = false)
     private User sender;
     
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "receiver_id", insertable = false, updatable = false)
     private User receiver;
     

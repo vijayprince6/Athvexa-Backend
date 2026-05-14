@@ -32,8 +32,13 @@ public class ChatService {
         Message message = new Message();
         message.setSender(sender);
         message.setReceiver(receiver);
+        message.setSenderId(sender.getId());
+        message.setReceiverId(receiver.getId());
         message.setContent(content);
         message.setIsRead(false);
+        
+        if (sender.getAuthId() != null) message.setSenderUuid(sender.getAuthId());
+        if (receiver.getAuthId() != null) message.setReceiverUuid(receiver.getAuthId());
         
         return messageRepository.save(message);
     }

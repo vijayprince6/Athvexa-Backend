@@ -65,6 +65,16 @@ public class User implements UserDetails {
     @Column(name = "occupation_name")
     private String occupationName;
     
+    // Coach-specific fields
+    private String role = "USER"; // USER or COACH
+    
+    private String sport; // Coach's sport specialization
+    
+    @Column(name = "academy_name")
+    private String academyName; // Coaching academy name
+    
+    private String experience; // Years of coaching experience
+    
     @Column(name = "profile_image_url")
     private String profileImageUrl;
     
