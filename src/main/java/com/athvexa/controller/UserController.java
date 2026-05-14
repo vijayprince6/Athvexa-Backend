@@ -69,4 +69,10 @@ public class UserController {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
+    
+    @GetMapping("/coaches/{sport}")
+    public ResponseEntity<List<User>> getCoachesBySport(@PathVariable String sport) {
+        List<User> coaches = userService.getCoachesBySport(sport);
+        return ResponseEntity.ok(coaches);
+    }
 }

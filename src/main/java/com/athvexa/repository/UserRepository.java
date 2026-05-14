@@ -34,4 +34,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
     
     @Query("SELECT SUM(p.points) FROM Post p WHERE p.userId = :userId")
     Integer calculateTotalPointsByUserId(@Param("userId") Long userId);
+    
+    @Query("SELECT u FROM User u WHERE u.role = 'COACH' AND u.sport = :sport ORDER BY u.totalPoints DESC")
+    List<User> findCoachesBySport(@Param("sport") String sport);
 }

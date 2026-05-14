@@ -110,4 +110,8 @@ public class UserService {
     public List<User> getUsersByOccupationAndGender(String occupation, String gender) {
         return userRepository.findUsersByOccupationAndGenderWithPointsOrderByPointsDesc(occupation, gender);
     }
+    
+    public List<User> getCoachesBySport(String sport) {
+        return userRepository.findCoachesBySport(sport);
+    }
 }
