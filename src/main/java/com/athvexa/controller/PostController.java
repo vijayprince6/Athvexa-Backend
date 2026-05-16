@@ -2,6 +2,8 @@ package com.athvexa.controller;
 
 import com.athvexa.model.Post;
 import com.athvexa.service.PostService;
+import com.athvexa.service.OCRService;
+import com.athvexa.service.AchievementValidationService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -16,6 +18,12 @@ public class PostController {
     
     @Autowired
     private PostService postService;
+    
+    @Autowired
+    private OCRService ocrService;
+    
+    @Autowired
+    private AchievementValidationService validationService;
     
     @PostMapping("/create")
     public ResponseEntity<?> createPost(
@@ -71,6 +79,44 @@ public class PostController {
         } catch (Exception e) {
             e.printStackTrace();
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+    
+    @PostMapping("/validate-achievement")
+    public ResponseEntity<?> validateAchievement(
+            @RequestParam("sport") String sport,
+            @RequestParam("achievementLevel") String achievementLevel,
+            @RequestParam("position") String position,
+            @RequestParam("image") MultipartFile image) {
+        try {
+            System.out.println("Validating achievement - Sport: " + sport + ", Level: " + achievementLevel + ", Position: " + position);
+            
+            // Extract text from image using OCR
+            String extractedText = ocrService.extractTextFromImage(image);
+            System.out.println("Extracted text: " + extractedText);
+            
+            // Validate the achievement
+            AchievementValidationService.ValidationResult validationResult = 
+                validationService.validateAchievement(extractedText, sport, achievementLevel, position);
+            
+            if (validationResult.isValid()) {
+                return ResponseEntity.ok(Map.of(
+                    "valid", true,
+                    "message", validationResult.getMessage()
+                ));
+            } else {
+                return ResponseEntity.badRequest().body(Map.of(
+                    "valid", false,
+                    "message", validationResult.getMessage(),
+                    "reason", validationResult.getReason()
+                ));
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.status(500).body(Map.of(
+                "valid", false,
+                "message", "Error validating achievement: " + e.getMessage()
+            ));
         }
     }
     
