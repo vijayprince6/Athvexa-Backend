@@ -55,6 +55,16 @@ public class LikeController {
         return ResponseEntity.ok(likes);
     }
     
+    @GetMapping("/post/{postId}/users")
+    public ResponseEntity<?> getPostLikers(@PathVariable Long postId) {
+        try {
+            List<com.athvexa.model.User> likers = likeService.getPostLikers(postId);
+            return ResponseEntity.ok(likers);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+    
     @GetMapping("/check")
     public ResponseEntity<?> checkLike(
             @RequestParam("userId") String userId,

@@ -85,6 +85,14 @@ public class LikeService {
         return likeRepository.findByPostId(postId);
     }
     
+    public List<com.athvexa.model.User> getPostLikers(Long postId) {
+        List<Like> likes = likeRepository.findByPostId(postId);
+        return likes.stream()
+                .map(like -> userRepository.findById(like.getUserId()).orElse(null))
+                .filter(user -> user != null)
+                .collect(java.util.stream.Collectors.toList());
+    }
+    
     public boolean isPostLikedByUser(String userId, Long postId) {
         return likeRepository.findByUserIdAndPostId(Long.parseLong(userId), postId) != null;
     }
