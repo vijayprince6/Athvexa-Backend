@@ -60,6 +60,7 @@ public class PostService {
     @Autowired
     private com.athvexa.repository.LikeRepository likeRepository;
 
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public List<Post> getAllPosts(String currentUserId) {
         try {
             System.out.println("DEBUG: Fetching all posts. currentUserId: " + currentUserId);
@@ -112,6 +113,7 @@ public class PostService {
         return getUserPosts(userId, null);
     }
     
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public List<Post> getUserPosts(String userId, String currentUserId) {
         try {
             Long targetId = Long.parseLong(userId);
@@ -141,7 +143,7 @@ public class PostService {
         } catch (Exception e) {
             System.err.println("DEBUG: Error in getUserPosts: " + e.getMessage());
             e.printStackTrace();
-            throw e;
+            throw new RuntimeException("Error fetching user posts: " + e.getMessage());
         }
     }
     
@@ -149,6 +151,7 @@ public class PostService {
         return getPostsBySport(sport, null);
     }
     
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public List<Post> getPostsBySport(String sport, String currentUserId) {
         List<Post> posts = postRepository.findBySportOrderByPointsDesc(sport);
         
@@ -174,6 +177,7 @@ public class PostService {
         return getPostById(postId, null);
     }
     
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public Optional<Post> getPostById(Long postId, String currentUserId) {
         Optional<Post> postOpt = postRepository.findById(postId);
         if (postOpt.isPresent() && currentUserId != null) {
