@@ -58,4 +58,21 @@ public class DebugController {
             ));
         }
     }
+
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
+    @GetMapping("/db-posts-schema")
+    public ResponseEntity<?> checkPostsSchema() {
+        try {
+            List<Map<String, Object>> columns = jdbcTemplate.queryForList(
+                "SELECT column_name, data_type, is_nullable, column_default " +
+                "FROM information_schema.columns " +
+                "WHERE table_name = 'posts'"
+            );
+            return ResponseEntity.ok(columns);
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
 }
