@@ -2,7 +2,7 @@
 
 The core API engine for **Athvexa**, a gamified sports social platform for athletes, coaches, and sports academies.
 
-Built with **Spring Boot (Java 17)** and integrated with **Supabase PostgreSQL**, **JWT Authentication**, **Cloudinary**, and **OCR-based certificate verification**.
+Built with **Spring Boot (Java 17)** and integrated with **Supabase PostgreSQL**, **JWT Authentication**, and **Cloudinary**.
 
 ---
 
@@ -11,7 +11,6 @@ Built with **Spring Boot (Java 17)** and integrated with **Supabase PostgreSQL**
 - 🔐 JWT Authentication & Role-based Access Control
 - 🏅 Gamified Ranking System with live point calculations
 - 💬 Real-time Chat API (messaging + unread tracking)
-- 📸 OCR-based Certificate Verification System
 - 👍 Posts, Likes & Community Engagement APIs
 - 👤 Athlete & Coach Profile Management
 - ☁️ Cloudinary Media Upload & Management
@@ -27,7 +26,6 @@ Built with **Spring Boot (Java 17)** and integrated with **Supabase PostgreSQL**
 - PostgreSQL (Supabase)
 - Cloudinary (Media Storage)
 - Docker (Containerized Deployment)
-- OCR Service (Tesseract / Vision API)
 
 ---
 
@@ -41,4 +39,4 @@ com.athvexa/
 ├── dto/            → Data Transfer Objects
 ├── model/          → JPA Entities
 ├── repository/     → Database layer
-└── service/        → Business logic (OCR, ranking, chat, points)
+└── service/        → Business logic (ranking, chat, points)

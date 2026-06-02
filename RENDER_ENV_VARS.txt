@@ -1,0 +1,34 @@
+=== RENDER ENVIRONMENT VARIABLES ===
+Copy these EXACT values into your Render dashboard under "Environment Variables"
+
+Key: SPRING_DATASOURCE_URL
+Value: jdbc:postgresql://aws-1-ap-south-1.pooler.supabase.com:5432/postgres?prepareThreshold=0
+
+Key: SPRING_DATASOURCE_USERNAME
+Value: postgres.wpamdnxkripvkiperlkl
+
+Key: SPRING_DATASOURCE_PASSWORD
+Value: Feel@My@Love@6
+
+Key: JWT_SECRET
+Value: 24!@#$%^&*()_+SportsPlatformJWT
+
+Key: CLOUDINARY_CLOUD_NAME
+Value: dxst75r0s
+
+Key: CLOUDINARY_API_KEY
+Value: 571284175968616
+
+Key: CLOUDINARY_API_SECRET
+Value: nlq-0bD7Ah76i_JuSaOxLuLT35c
+
+=== IMPORTANT ===
+1. Go to Render dashboard → Athvexa-Backend → Environment
+2. Click "Edit" button
+3. Add each Key-Value pair EXACTLY as shown above
+4. Click "Save Changes"
+5. Render will auto-redeploy with new environment variables
+
+=== FOR LOCAL TESTING (OPTIONAL) ===
+If you want to run locally, you need to set these as Windows environment variables OR
+create an application-local.properties file (not recommended for security)
