@@ -96,12 +96,12 @@ public class AuthController {
             System.out.println("Login error: " + e.getMessage());
             if ("User not found".equals(e.getMessage())) {
                 return ResponseEntity.status(404).body(Map.of(
-                    "error", "No account found with this email. Please register first.",
+                    "error", "No account found.",
                     "errorCode", "USER_NOT_FOUND"
                 ));
             } else if ("Invalid password".equals(e.getMessage())) {
                 return ResponseEntity.status(401).body(Map.of(
-                    "error", "Incorrect password. Please check your password and try again.",
+                    "error", "Incorrect email or password.",
                     "errorCode", "WRONG_PASSWORD"
                 ));
             }
