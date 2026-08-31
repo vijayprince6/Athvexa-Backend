@@ -1,35 +1,25 @@
-# Project build
-target/
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.ps1
+*ENV_VARS*.txt
 
-# IDE files
-.idea/
+# IDE
 .vscode/
-*.iml
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
 
 # Logs
 *.log
+logs/
 
-# OS files
-.DS_Store
-
-# Java compiled files
-*.class
-
-# Package files
-*.jar
-*.war
-*.nar
-*.ear
-*.zip
-*.tar.gz
-*.rar
-
-# BlueJ
-*.ctxt
-
-# J2ME
-.mtj.tmp/
-
-# Crash logs
-hs_err_pid*
-replay_pid*
+# Temporary files
+*.tmp
+*.bak
