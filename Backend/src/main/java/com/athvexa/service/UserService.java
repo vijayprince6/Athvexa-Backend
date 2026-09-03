@@ -53,6 +53,12 @@ public class UserService {
     }
     
     public Optional<User> findByUsername(String username) {
+        // Try case-insensitive search first for Ask AI feature
+        Optional<User> user = userRepository.findByUsernameIgnoreCase(username);
+        if (user.isPresent()) {
+            return user;
+        }
+        // Fallback to exact match for backward compatibility
         return userRepository.findByUsername(username);
     }
     
