@@ -18,7 +18,7 @@ const Login = () => {
   // Pinging /api/auth/current-user on mount gives them a head-start before the
   // user even types their password, so the actual login feels instant.
   useEffect(() => {
-    axios.get('/health').catch(() => {
+    axios.get('/api/health').catch(() => {
       // Ignore errors — we only care about waking the server, not the response
     });
   }, []);

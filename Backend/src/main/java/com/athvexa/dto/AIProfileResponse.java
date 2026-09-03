@@ -5,11 +5,13 @@ import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 
+import java.util.List;
+
 /**
  * Response DTO returned by POST /api/ai/profile-summary
  *
  * Contains safe, public profile information (no email, password, authId, DOB)
- * plus the Gemini-generated AI summary text.
+ * plus the Gemini-generated AI summary text and structured achievement data.
  */
 @Data
 @NoArgsConstructor
@@ -36,9 +38,35 @@ public class AIProfileResponse {
     private String bio;
     private String profileImageUrl;
 
+    /**
+     * The user's organization/school/club.
+     * For coaches: academyName field.
+     * For athletes: extracted from posts or null (never invented).
+     */
+    private String organizationName;
+
     // ── Coach-specific (public, only meaningful when role == "COACH") ────────
-    private String academyName;
     private String experience;
+
+    // ── Achievement data (derived from user's actual posts) ──────────────────
+    /**
+     * List of formatted achievement strings, e.g.:
+     *   "State Level — Table Tennis, 1st Place, Under-19"
+     * Only populated from posts that actually belong to this user.
+     */
+    private List<String> achievements;
+
+    /**
+     * Sports category from the user's most recent post (e.g., "Under-19").
+     * Null if the user has no posts or no category data in their posts.
+     */
+    private String category;
+
+    /**
+     * Specialization derived from post sport + description (e.g., "Table Tennis Doubles").
+     * Null if insufficient data to determine specialization confidently.
+     */
+    private String specialization;
 
     // ── AI-generated content ─────────────────────────────────────────────────
     /**

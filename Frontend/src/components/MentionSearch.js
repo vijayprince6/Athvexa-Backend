@@ -5,14 +5,13 @@ import AIProfileCard from './AIProfileCard';
 /**
  * MentionSearch
  *
- * A smart search bar that detects @username mentions and calls the
- * backend AI profile-summary endpoint.
+ * A smart search bar that accepts @username or plain username mentions and
+ * calls the backend AI profile-summary endpoint.
  *
  * Supported input patterns:
- *   @vijayprince
- *   @vijayprince summarize
- *   @vijayprince what sport does he play?
- *   @coachname how many years of experience does he have?
+ *   vijayprince              (plain username)
+ *   @vijayprince             (@username)
+ *   @vijayprince what sport does he play?  (with optional question)
  *
  * The Gemini API key NEVER touches this component — all AI logic is
  * handled server-side by AIController + AIService.
@@ -20,31 +19,35 @@ import AIProfileCard from './AIProfileCard';
 const MentionSearch = () => {
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);   // AIProfileResponse from backend
-  const [parseError, setParseError] = useState(''); // input validation error
+  const [result, setResult] = useState(null);
+  const [parseError, setParseError] = useState('');
 
   const inputRef = useRef(null);
 
   // ── Input parsing ─────────────────────────────────────────────────────────
   /**
    * Parses the user's input into { username, question }.
-   * Returns null if no valid @username found.
+   * Returns null if the input is blank or contains invalid characters.
    *
-   * Examples:
-   *   "@vijayprince"                    → { username: "vijayprince", question: null }
-   *   "@vijayprince what sport?"        → { username: "vijayprince", question: "what sport?" }
-   *   "@coach summarize this coach"     → { username: "coach", question: "summarize this coach" }
+   * Accepts:
+   *   "vijayprince"                    → { username: "vijayprince", question: null }
+   *   "@vijayprince"                   → { username: "vijayprince", question: null }
+   *   "@vijayprince what sport?"       → { username: "vijayprince", question: "what sport?" }
    */
   const parseInput = (raw) => {
     const trimmed = raw.trim();
-    // Must start with @
-    if (!trimmed.startsWith('@')) return null;
+    if (!trimmed) return null;
 
-    // Match @username (alphanumeric + underscore + dot)
-    const match = trimmed.match(/^@([a-zA-Z0-9_.]+)([\s\S]*)$/);
+    // Strip leading @ if present
+    const withoutAt = trimmed.startsWith('@') ? trimmed : ('@' + trimmed);
+
+    // Match @username (alphanumeric + underscore + dot + hyphen)
+    const match = withoutAt.match(/^@([a-zA-Z0-9_.@-]+)([\s\S]*)$/);
     if (!match) return null;
 
     const username = match[1].trim();
+    if (!username) return null;
+
     const rest = match[2].trim();
 
     return {
@@ -58,7 +61,7 @@ const MentionSearch = () => {
     const parsed = parseInput(inputValue);
 
     if (!parsed) {
-      setParseError('Start with @username to search a profile. Example: @vijayprince');
+      setParseError('Enter a username or @username. Example: vijayprince or @vijayprince');
       return;
     }
 
@@ -81,7 +84,6 @@ const MentionSearch = () => {
       setResult(response.data);
     } catch (err) {
       console.error('AI profile summary request failed:', err);
-      // Surface a friendly error in the card format
       setResult({
         error: err.response?.data?.error || 'Could not connect to the server. Please try again.',
       });
@@ -90,14 +92,10 @@ const MentionSearch = () => {
     }
   }, [inputValue]);
 
-  // ── Keyboard handler — submit on Enter ───────────────────────────────────
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !loading) {
-      handleSearch();
-    }
+    if (e.key === 'Enter' && !loading) handleSearch();
   };
 
-  // ── Clear / dismiss ──────────────────────────────────────────────────────
   const handleClear = () => {
     setInputValue('');
     setResult(null);
@@ -133,6 +131,7 @@ const MentionSearch = () => {
     color: '#2d3748',
     background: 'transparent',
     fontFamily: 'inherit',
+    minWidth: 0,
   };
 
   const searchBtnStyle = {
@@ -189,7 +188,6 @@ const MentionSearch = () => {
         marginTop: 16,
         boxShadow: '0 8px 32px rgba(102, 126, 234, 0.08)',
       }}>
-        {/* Header skeleton */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
           <div className="skeleton-line" style={{ width: 56, height: 56, borderRadius: '50%' }} />
           <div style={{ flex: 1 }}>
@@ -197,22 +195,18 @@ const MentionSearch = () => {
             <div className="skeleton-line" style={{ height: 12, width: '30%' }} />
           </div>
         </div>
-        {/* Stats skeleton */}
         <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
           {[80, 90, 100].map((w, i) => (
             <div key={i} className="skeleton-line" style={{ height: 28, width: w, borderRadius: 20 }} />
           ))}
         </div>
-        {/* Divider */}
         <div style={{ height: 1, background: '#f0f3ff', margin: '12px 0' }} />
-        {/* AI section skeleton */}
         <div style={{ background: '#f8f9ff', borderRadius: 14, padding: '14px 16px' }}>
           <div className="skeleton-line" style={{ height: 12, width: '25%', marginBottom: 12 }} />
           <div className="skeleton-line" style={{ height: 13, width: '95%', marginBottom: 8 }} />
           <div className="skeleton-line" style={{ height: 13, width: '85%', marginBottom: 8 }} />
           <div className="skeleton-line" style={{ height: 13, width: '70%' }} />
         </div>
-        {/* Buttons skeleton */}
         <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
           <div className="skeleton-line" style={{ flex: 1, height: 42, borderRadius: 12 }} />
           <div className="skeleton-line" style={{ flex: 1, height: 42, borderRadius: 12 }} />
@@ -227,13 +221,13 @@ const MentionSearch = () => {
       {/* Search bar */}
       <div style={searchBarStyle}>
         {/* @ icon prefix */}
-        <span style={{ fontSize: 18, color: '#667eea', flexShrink: 0 }}>@</span>
+        <span style={{ fontSize: 18, color: '#667eea', flexShrink: 0, userSelect: 'none' }}>@</span>
 
         <input
           ref={inputRef}
           id="ai-mention-search-input"
           type="text"
-          placeholder="username  or  @username what sport does he play?"
+          placeholder="Enter username or @username"
           value={inputValue}
           onChange={(e) => {
             setInputValue(e.target.value);

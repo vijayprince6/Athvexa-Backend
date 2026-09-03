@@ -11,10 +11,11 @@ import Chat from './components/Chat';
 import Camera from './components/Camera';
 import Profile from './components/Profile';
 import EditProfile from './components/EditProfile';
-import Rankings from './components/Rankings';
 import Post from './components/Post';
+import Rankings from './components/Rankings';
 import Coaches from './components/Coaches';
 import SportCoaches from './components/SportCoaches';
+import AskAIButton from './components/AskAIButton';
 
 function App() {
   return (
@@ -36,6 +37,8 @@ function App() {
           <Route path="/coaches" element={<Coaches />} />
           <Route path="/coaches/:sport" element={<SportCoaches />} />
         </Routes>
+        {/* AskAIButton must be inside Router to use useLocation() */}
+        <AskAIButton />
       </Router>
     </div>
   );

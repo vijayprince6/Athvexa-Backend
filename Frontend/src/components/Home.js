@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import BottomNavbar from './BottomNavbar';
 import PostCard from './PostCard';
-import MentionSearch from './MentionSearch';
+
 
 const Home = () => {
   const [posts, setPosts] = useState([]);
@@ -178,8 +178,7 @@ const Home = () => {
           <p>Real-time achievements from all Athvexa athletes</p>
         </div>
 
-        {/* ── AI @mention Search ── */}
-        <MentionSearch />
+
 
         {error && (
           <div className="error-banner">
