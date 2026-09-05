@@ -22,43 +22,27 @@ import java.util.stream.Collectors;
 /**
  * AIService — handles the @username profile-summary feature.
  *
- * Flow:
- *  1. Look up user by username via UserService (existing logic, no duplication).
- *  2. Determine athlete vs coach from user.role.
- *  3. Collect safe, public profile information (no email/password/authId/DOB).
- *  4. Fetch top-5 recent posts as "achievements" context (sport + level + description).
- *  5. Derive structured fields: organizationName, achievements, category, specialization.
- *  6. Build a clear, constrained Gemini prompt.
- *  7. Call the Gemini REST API (gemini-2.0-flash) with retry logic for 503 errors.
- *  8. Parse and return the AI-generated text inside AIProfileResponse.
- *
- * Security:
- *  - API key is read from the GEMINI_API_KEY environment variable only.
- *  - The key is NEVER included in any response DTO or log statement.
- *  - Sensitive user fields (email, password, authId, dateOfBirth) are never
- *    added to the prompt or the response DTO.
+ * Provides strict @[username] Summary formatting with Gemini API
+ * and deterministic fallback generation.
  */
 @Service
 public class AIService {
 
     private static final Logger log = LoggerFactory.getLogger(AIService.class);
 
-    // ── Gemini REST API configuration ──────────────────────────────────────
     private static final String GEMINI_API_URL =
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent";
 
     private static final int MAX_POSTS_IN_CONTEXT = 5;
     private static final int MAX_RETRY_ATTEMPTS = 3;
-    private static final long INITIAL_BACKOFF_MS = 1000; // 1 second
+    private static final long INITIAL_BACKOFF_MS = 1000;
 
-    // Keywords used to detect specialization from post descriptions
     private static final List<String> SPECIALIZATION_KEYWORDS = Arrays.asList(
             "singles", "doubles", "mixed doubles", "relay", "sprint", "marathon",
             "freestyle", "backstroke", "breaststroke", "butterfly", "medley",
             "kata", "kumite", "team", "individual"
     );
 
-    // Keywords used to extract organization from post descriptions
     private static final Pattern ORG_PATTERN = Pattern.compile(
             "(?:from|at|representing|for|of|school|college|academy|club|institute)\\s+([A-Z][\\w'\\s]{2,50}?)(?:[,.]|$)",
             Pattern.CASE_INSENSITIVE
@@ -67,7 +51,6 @@ public class AIService {
     @Value("${gemini.api.key}")
     private String geminiApiKey;
 
-    // ── Dependencies ────────────────────────────────────────────────────────
     @Autowired
     private UserService userService;
 
@@ -77,20 +60,7 @@ public class AIService {
     @Autowired
     private RestTemplate restTemplate;
 
-    // ───────────────────────────────────────────────────────────────────────
-    // Public API
-    // ───────────────────────────────────────────────────────────────────────
-
-    /**
-     * Generate an AI profile summary for the given @username.
-     *
-     * @param username the Athvexa username to look up (without @)
-     * @param question optional natural-language question; if null/blank a generic
-     *                 summary is generated
-     * @return AIProfileResponse — on success has aiSummary; on failure has error
-     */
     public AIProfileResponse generateProfileSummary(String username, String question) {
-        // ── 1. Look up user ──────────────────────────────────────────────────
         Optional<User> userOpt = userService.findByUsername(username);
         if (userOpt.isEmpty()) {
             log.warn("AI profile lookup: username '{}' not found", username);
@@ -102,67 +72,240 @@ public class AIService {
         User user = userOpt.get();
         boolean isCoach = "COACH".equalsIgnoreCase(user.getRole());
 
-        // ── 2. Fetch recent posts for achievement context ────────────────────
-        // Strictly filtered to this user's own posts — never another user's
         List<Post> recentPosts = postRepository
                 .findByUserIdOrderByCreatedAtDesc(user.getId())
                 .stream()
                 .limit(MAX_POSTS_IN_CONTEXT)
                 .collect(Collectors.toList());
 
-        // ── 3. Derive structured fields from posts ───────────────────────────
         List<String> achievements = deriveAchievements(recentPosts);
         String category = deriveCategory(recentPosts);
         String specialization = deriveSpecialization(recentPosts, user.getSport());
         String organizationName = deriveOrganizationName(user, isCoach, recentPosts);
 
-        // ── 4. Build the Gemini prompt ───────────────────────────────────────
-        String prompt = buildPrompt(user, isCoach, recentPosts, organizationName, question);
-
-        // ── 5. Call Gemini API with retry logic ──────────────────────────────
-        String aiText;
-        try {
-            aiText = callGeminiApiWithRetry(prompt);
-        } catch (HttpClientErrorException e) {
-            int statusCode = e.getStatusCode().value();
-            if (statusCode == 429) {
-                log.warn("Gemini API rate limit hit for username '{}'", username);
-                return buildProfileWithError(user, isCoach, organizationName, achievements,
-                        category, specialization,
-                        "AI is busy right now. Please try again in a moment.");
+        String aiText = null;
+        if (notBlank(geminiApiKey) && !"your_gemini_api_key_here".equals(geminiApiKey)) {
+            try {
+                String prompt = buildPrompt(user, isCoach, recentPosts, question);
+                aiText = callGeminiApiWithRetry(prompt);
+                aiText = cleanAndValidateGeminiResponse(aiText, user.getUsername());
+            } catch (Exception e) {
+                log.warn("Gemini API call failed for user '@{}'. Falling back to deterministic summary. Reason: {}",
+                        username, e.getMessage());
+                aiText = null;
             }
-            log.error("Gemini API client error for username '{}': {} - Response body: {}",
-                    username, e.getStatusCode(), sanitizeErrorBody(e.getResponseBodyAsString()));
-            return buildProfileWithError(user, isCoach, organizationName, achievements,
-                    category, specialization,
-                    "Could not generate AI summary. Please try again.");
-        } catch (HttpServerErrorException e) {
-            log.error("Gemini API server error for username '{}': {} - Response body: {}",
-                    username, e.getStatusCode(), sanitizeErrorBody(e.getResponseBodyAsString()));
-            return buildProfileWithError(user, isCoach, organizationName, achievements,
-                    category, specialization,
-                    "AI service is temporarily unavailable. Please try again.");
-        } catch (Exception e) {
-            log.error("Unexpected error calling Gemini for username '{}'", username, e);
-            return buildProfileWithError(user, isCoach, organizationName, achievements,
-                    category, specialization,
-                    "Could not generate AI summary. Please try again.");
         }
 
-        // ── 6. Assemble and return response ──────────────────────────────────
+        if (!notBlank(aiText)) {
+            aiText = generateDeterministicSummary(user, recentPosts);
+        }
+
         return buildProfileResponse(user, isCoach, organizationName, achievements,
                 category, specialization, aiText);
     }
 
-    // ───────────────────────────────────────────────────────────────────────
-    // Derivation helpers — all based solely on user's own data
-    // ───────────────────────────────────────────────────────────────────────
+    private String generateDeterministicSummary(User user, List<Post> posts) {
+        StringBuilder sb = new StringBuilder();
 
-    /**
-     * Formats each post into a human-readable achievement string.
-     * Example: "State Level — Table Tennis, 1st Place, Under-19"
-     * Returns an empty list if there are no posts.
-     */
+        // 1. Header line
+        sb.append("@").append(user.getUsername()).append(" Summary:\n\n");
+
+        // 2. Role and Sport line
+        String roleStr = null;
+        if (notBlank(user.getRole())) {
+            String rawRole = user.getRole().trim().toUpperCase();
+            if ("COACH".equals(rawRole)) {
+                roleStr = "Coach";
+            } else if ("ATHLETE".equals(rawRole) || "USER".equals(rawRole) || "PLAYER".equals(rawRole)) {
+                roleStr = "Athlete";
+            } else {
+                roleStr = rawRole.substring(0, 1).toUpperCase() + rawRole.substring(1).toLowerCase();
+            }
+        }
+
+        String derivedSport = notBlank(user.getSport()) ? user.getSport().trim() : deriveSportFromPosts(posts);
+        String sportStr = formatSportName(derivedSport);
+
+        if (roleStr != null && sportStr != null) {
+            sb.append(roleStr).append(" in ").append(sportStr).append(".\n\n");
+        } else if (roleStr != null) {
+            sb.append(roleStr).append(".\n\n");
+        } else if (sportStr != null) {
+            sb.append("In ").append(sportStr).append(".\n\n");
+        }
+
+        // 3. Short summary of actual achievements/posts
+        String achievementsSummary = buildAchievementsSummaryFallback(posts);
+        if (notBlank(achievementsSummary)) {
+            sb.append(achievementsSummary).append("\n\n");
+        }
+
+        // 4. Current points line
+        if (user.getTotalPoints() != null) {
+            sb.append("Current points: ").append(user.getTotalPoints()).append(".");
+        } else if (sb.length() >= 2 && sb.substring(sb.length() - 2).equals("\n\n")) {
+            sb.setLength(sb.length() - 2);
+        }
+
+        return sb.toString().trim();
+    }
+
+    private String buildAchievementsSummaryFallback(List<Post> posts) {
+        if (posts == null || posts.isEmpty()) {
+            return null;
+        }
+
+        Set<String> levels = new LinkedHashSet<>();
+        Set<String> details = new LinkedHashSet<>();
+
+        for (Post p : posts) {
+            if (p.getAchievementLevel() != null) {
+                String lvlName = p.getAchievementLevel().getDisplayName();
+                if (lvlName.contains("Local Level")) {
+                    lvlName = "Local Level";
+                }
+                levels.add(lvlName);
+            }
+            if (notBlank(p.getCategory())) {
+                details.add(p.getCategory().trim());
+            }
+
+            String formattedPos = formatPosition(p.getPosition());
+            if (notBlank(formattedPos)) {
+                details.add(formattedPos);
+            }
+
+            if (notBlank(p.getDescription())) {
+                String desc = p.getDescription().trim();
+                String descLower = desc.toLowerCase();
+                for (String kw : SPECIALIZATION_KEYWORDS) {
+                    if (descLower.contains(kw)) {
+                        String kwCap = kw.substring(0, 1).toUpperCase() + kw.substring(1);
+                        String postSport = formatSportName(p.getSport());
+                        if (postSport != null) {
+                            details.add(postSport + " " + kwCap);
+                        } else {
+                            details.add(kwCap);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (levels.isEmpty() && details.isEmpty()) {
+            List<String> descs = posts.stream()
+                    .map(Post::getDescription)
+                    .filter(this::notBlank)
+                    .map(String::trim)
+                    .limit(2)
+                    .collect(Collectors.toList());
+            if (descs.isEmpty()) {
+                return null;
+            }
+            return "Has shared posts: " + String.join("; ", descs) + ".";
+        }
+
+        StringBuilder sb = new StringBuilder("Has shared achievements");
+        if (!levels.isEmpty()) {
+            sb.append(" from ").append(joinWithAnd(levels)).append(" competitions");
+        }
+        if (!details.isEmpty()) {
+            sb.append(", including ").append(String.join(", ", details));
+        }
+        sb.append(".");
+        return sb.toString();
+    }
+
+    private String deriveSportFromPosts(List<Post> posts) {
+        if (posts == null || posts.isEmpty()) return null;
+        return posts.stream()
+                .map(Post::getSport)
+                .filter(this::notBlank)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String formatPosition(String pos) {
+        if (pos == null || pos.isBlank()) return null;
+        String trimmed = pos.trim();
+        if (trimmed.matches("\\d+")) {
+            int n = Integer.parseInt(trimmed);
+            if (n == 1) return "1st Place";
+            if (n == 2) return "2nd Place";
+            if (n == 3) return "3rd Place";
+            return n + "th Place";
+        }
+        return trimmed;
+    }
+
+    private String formatSportName(String sport) {
+        if (!notBlank(sport)) return null;
+        String s = sport.trim();
+        if ("tabletennis".equalsIgnoreCase(s)) return "Table Tennis";
+        if ("badminton".equalsIgnoreCase(s)) return "Badminton";
+        if ("cricket".equalsIgnoreCase(s)) return "Cricket";
+        if ("football".equalsIgnoreCase(s)) return "Football";
+        if ("tennis".equalsIgnoreCase(s)) return "Tennis";
+        if ("basketball".equalsIgnoreCase(s)) return "Basketball";
+        if ("volleyball".equalsIgnoreCase(s)) return "Volleyball";
+        if ("athletics".equalsIgnoreCase(s)) return "Athletics";
+        if ("swimming".equalsIgnoreCase(s)) return "Swimming";
+        if ("chess".equalsIgnoreCase(s)) return "Chess";
+        if ("carrom".equalsIgnoreCase(s)) return "Carrom";
+        return s.substring(0, 1).toUpperCase() + s.substring(1);
+    }
+
+    private String joinWithAnd(Collection<String> items) {
+        if (items == null || items.isEmpty()) return "";
+        List<String> list = new ArrayList<>(items);
+        if (list.size() == 1) return list.get(0);
+        if (list.size() == 2) return list.get(0) + " and " + list.get(1);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < list.size(); i++) {
+            if (i > 0) {
+                if (i == list.size() - 1) {
+                    sb.append(" and ");
+                } else {
+                    sb.append(", ");
+                }
+            }
+            sb.append(list.get(i));
+        }
+        return sb.toString();
+    }
+
+    private String cleanAndValidateGeminiResponse(String text, String username) {
+        if (!notBlank(text)) return null;
+
+        String cleaned = text.trim();
+        if (cleaned.startsWith("```")) {
+            int firstNewline = cleaned.indexOf("\n");
+            if (firstNewline != -1) {
+                cleaned = cleaned.substring(firstNewline + 1);
+            }
+            if (cleaned.endsWith("```")) {
+                cleaned = cleaned.substring(0, cleaned.length() - 3);
+            }
+            cleaned = cleaned.trim();
+        }
+
+        String headerTarget = "@" + username + " Summary:";
+        int headerIdx = cleaned.indexOf(headerTarget);
+        if (headerIdx == -1) {
+            String lowerCleaned = cleaned.toLowerCase();
+            String lowerTarget = ("@" + username + " summary:").toLowerCase();
+            headerIdx = lowerCleaned.indexOf(lowerTarget);
+        }
+
+        if (headerIdx != -1) {
+            cleaned = cleaned.substring(headerIdx).trim();
+        } else {
+            cleaned = "@" + username + " Summary:\n\n" + cleaned;
+        }
+
+        return cleaned;
+    }
+
     private List<String> deriveAchievements(List<Post> posts) {
         if (posts == null || posts.isEmpty()) return Collections.emptyList();
 
@@ -181,7 +324,6 @@ public class AIService {
             if (notBlank(p.getCategory())) {
                 sb.append(", ").append(p.getCategory());
             }
-            // Truncate very long descriptions but still include them
             if (notBlank(p.getDescription())) {
                 String desc = p.getDescription().trim();
                 if (desc.length() > 120) desc = desc.substring(0, 120) + "...";
@@ -191,10 +333,6 @@ public class AIService {
         }).filter(Objects::nonNull).collect(Collectors.toList());
     }
 
-    /**
-     * Returns the category from the user's most recent post that has a category.
-     * Category comes from the post data, NOT from the user's current age.
-     */
     private String deriveCategory(List<Post> posts) {
         if (posts == null || posts.isEmpty()) return null;
         return posts.stream()
@@ -204,11 +342,6 @@ public class AIService {
                 .orElse(null);
     }
 
-    /**
-     * Attempts to identify a specialization from the user's posts.
-     * Checks post descriptions for known specialization keywords.
-     * Returns null if no reliable specialization can be determined.
-     */
     private String deriveSpecialization(List<Post> posts, String baseSport) {
         if (posts == null || posts.isEmpty()) return null;
 
@@ -219,14 +352,10 @@ public class AIService {
 
             for (String keyword : SPECIALIZATION_KEYWORDS) {
                 if (descLower.contains(keyword)) {
-                    // Build a specialization string: "Table Tennis Doubles" etc.
                     String sport = notBlank(post.getSport()) ? post.getSport()
                             : (notBlank(baseSport) ? baseSport : null);
                     if (sport != null) {
-                        // Capitalize keyword
                         String kw = keyword.substring(0, 1).toUpperCase() + keyword.substring(1);
-                        // Avoid duplicating sport name
-                        String sportLower = sport.toLowerCase().replace("\\s", "");
                         if (!descLower.replace(keyword, "").trim().isEmpty()) {
                             return sport + " " + kw;
                         }
@@ -238,27 +367,17 @@ public class AIService {
         return null;
     }
 
-    /**
-     * Derives the organization name for the user.
-     * For coaches: uses academyName (already a dedicated field).
-     * For athletes: checks if academyName is set, then tries to extract from post descriptions.
-     * Never invents an organization.
-     */
     private String deriveOrganizationName(User user, boolean isCoach, List<Post> posts) {
-        // Coaches have a dedicated academyName field
         if (notBlank(user.getAcademyName())) {
             return user.getAcademyName();
         }
 
-        // Try to extract from post descriptions using regex patterns like
-        // "from St. Joseph's School", "representing XYZ Academy"
         if (posts != null) {
             for (Post post : posts) {
                 if (!notBlank(post.getDescription())) continue;
                 Matcher m = ORG_PATTERN.matcher(post.getDescription());
                 if (m.find()) {
                     String candidate = m.group(1).trim();
-                    // Sanity check: must be at least 3 chars and not a generic word
                     if (candidate.length() >= 3) {
                         return candidate;
                     }
@@ -266,117 +385,77 @@ public class AIService {
             }
         }
 
-        return null; // Unknown — do not invent
+        return null;
     }
 
-    // ───────────────────────────────────────────────────────────────────────
-    // Prompt builder
-    // ───────────────────────────────────────────────────────────────────────
-
-    /**
-     * Builds a constrained Gemini prompt.
-     * The system instruction forbids the model from inventing facts.
-     * The user turn provides the profile data and the optional question.
-     */
-    private String buildPrompt(User user, boolean isCoach, List<Post> posts,
-                               String organizationName, String question) {
+    private String buildPrompt(User user, boolean isCoach, List<Post> posts, String question) {
         StringBuilder sb = new StringBuilder();
 
-        // ── Profile section ──────────────────────────────────────────────────
-        sb.append("=== ATHVEXA USER PROFILE ===\n");
+        sb.append("=== ATHVEXA USER PROFILE DATA ===\n");
+        sb.append("Username: ").append(user.getUsername()).append("\n");
+        String roleStr = isCoach ? "Coach" : "Athlete";
+        sb.append("Role: ").append(roleStr).append("\n");
 
-        String displayName = notBlank(user.getName()) ? user.getName()
-                : (notBlank(user.getFullName()) ? user.getFullName() : user.getUsername());
-        sb.append("Name: ").append(displayName).append("\n");
-        sb.append("Username: @").append(user.getUsername()).append("\n");
-        sb.append("Type: ").append(isCoach ? "Coach" : "Athlete / Player").append("\n");
+        String derivedSport = notBlank(user.getSport()) ? user.getSport().trim() : deriveSportFromPosts(posts);
+        String sportStr = formatSportName(derivedSport);
 
-        if (notBlank(user.getSport())) {
-            sb.append("Sport: ").append(user.getSport()).append("\n");
+        if (notBlank(sportStr)) {
+            sb.append("Sport: ").append(sportStr).append("\n");
         }
-        if (notBlank(user.getOccupation())) {
-            sb.append("Occupation: ").append(user.getOccupation()).append("\n");
-        }
-        if (notBlank(user.getOccupationName())) {
-            sb.append("Occupation Detail: ").append(user.getOccupationName()).append("\n");
+        if (user.getTotalPoints() != null) {
+            sb.append("Points: ").append(user.getTotalPoints()).append("\n");
         }
 
-        sb.append("Total Points: ").append(user.getTotalPoints() != null ? user.getTotalPoints() : 0).append("\n");
-
-        if (notBlank(organizationName)) {
-            sb.append("Organization: ").append(organizationName).append("\n");
-        }
-
-        if (notBlank(user.getBio())) {
-            sb.append("Bio: ").append(user.getBio()).append("\n");
-        }
-
-        // Coach-specific context
-        if (isCoach && notBlank(user.getExperience())) {
-            sb.append("Coaching Experience: ").append(user.getExperience()).append("\n");
-        }
-
-        // ── Recent achievements ──────────────────────────────────────────────
         if (posts != null && !posts.isEmpty()) {
-            sb.append("\n=== RECENT ACHIEVEMENT POSTS ===\n");
-            for (int i = 0; i < posts.size(); i++) {
-                Post p = posts.get(i);
-                sb.append(i + 1).append(". Sport: ").append(nullSafe(p.getSport()));
+            sb.append("Recent Achievement Posts:\n");
+            for (Post p : posts) {
+                sb.append("- ");
                 if (p.getAchievementLevel() != null) {
-                    sb.append(", Level: ").append(p.getAchievementLevel().getDisplayName());
+                    sb.append("Level: ").append(p.getAchievementLevel().getDisplayName()).append("; ");
+                }
+                if (notBlank(p.getSport())) {
+                    sb.append("Sport: ").append(formatSportName(p.getSport())).append("; ");
                 }
                 if (notBlank(p.getPosition())) {
-                    sb.append(", Position: ").append(p.getPosition());
+                    sb.append("Position: ").append(formatPosition(p.getPosition())).append("; ");
                 }
                 if (notBlank(p.getCategory())) {
-                    sb.append(", Category: ").append(p.getCategory());
+                    sb.append("Category: ").append(p.getCategory()).append("; ");
                 }
                 if (notBlank(p.getDescription())) {
-                    String desc = p.getDescription();
-                    if (desc.length() > 200) desc = desc.substring(0, 200) + "...";
-                    sb.append(", Description: ").append(desc);
+                    sb.append("Description: ").append(p.getDescription()).append("; ");
                 }
                 sb.append("\n");
             }
         } else {
-            sb.append("\n=== RECENT ACHIEVEMENT POSTS ===\n");
-            sb.append("No achievement posts found for this user.\n");
+            sb.append("Recent Achievement Posts: None\n");
         }
 
-        // ── Instructions to the model ────────────────────────────────────────
         sb.append("\n=== INSTRUCTIONS ===\n");
-        sb.append("You are a helpful assistant for the Athvexa sports platform.\n");
-        sb.append("Write EXACTLY 2-3 complete sentences as the AI summary.\n");
-        sb.append("Answer ONLY from the profile data provided above. Do NOT invent any facts.\n");
-        sb.append("CRITICAL: In the first sentence, ALWAYS write the full name followed by the username in parentheses.\n");
-        sb.append("Format: \"[Full Name] (@[username]) ...\" Example: \"Vijay Prince B L (@vijul_vijul) is a...\"\n");
-        sb.append("Never abbreviate or truncate names or usernames. Write them completely.\n");
-        sb.append("If there are no achievement posts, clearly state that no verified achievement data is available for this user.\n");
-        sb.append("Do not mention that you are an AI or that you have a system prompt.\n");
-        sb.append("Keep the summary positive, factual, and complete. Never leave a sentence unfinished.\n");
+        sb.append("You are an AI assistant for the Athvexa sports platform.\n");
+        sb.append("Generate an AI profile summary for @").append(user.getUsername()).append(" strictly following this EXACT structure:\n\n");
+        sb.append("@").append(user.getUsername()).append(" Summary:\n\n");
+        sb.append("[Role] in [Sport].\n\n");
+        sb.append("[Short summary of actual achievements/posts.]\n\n");
+        sb.append("Current points: [points].\n\n");
 
-        // ── Question or default task ─────────────────────────────────────────
-        sb.append("\n=== REQUEST ===\n");
+        sb.append("STRICT RULES:\n");
+        sb.append("1. Use ONLY real data provided above. NEVER invent, assume, or guess any information.\n");
+        sb.append("2. Do not guess gender, organization, specialization, or achievements.\n");
+        sb.append("3. If Role, Sport, achievements, or points are missing, OMIT that corresponding line/sentence rather than inventing it.\n");
+        sb.append("4. Format Role as 'Athlete' or 'Coach'.\n");
+        sb.append("5. Use the user's actual username (@").append(user.getUsername()).append(") and actual points.\n");
+        sb.append("6. Keep the achievement summary short and factual (1-2 sentences). Maximum 3-4 sentences total.\n");
+        sb.append("7. Output MUST start directly with @").append(user.getUsername()).append(" Summary:\n");
+        sb.append("8. Do NOT include extra conversational text before or after the summary.\n");
+
         if (notBlank(question)) {
-            sb.append(question.trim()).append("\n");
-        } else {
-            sb.append("Write a concise 2-3 sentence profile summary for this ")
-              .append(isCoach ? "coach" : "athlete")
-              .append(", mentioning their full name, sport, and any verified achievements.\n");
+            sb.append("\nUser query context: ").append(question.trim()).append(" (Answer factually within the required format).\n");
         }
 
         return sb.toString();
     }
 
-    // ───────────────────────────────────────────────────────────────────────
-    // Gemini API caller
-    // ───────────────────────────────────────────────────────────────────────
-
-    /**
-     * Calls the Gemini REST API with retry logic for transient errors.
-     * Retries 503 SERVICE_UNAVAILABLE and other 5xx errors with exponential backoff.
-     * Does NOT retry 4xx client errors (400, 401, 403, etc.).
-     */
     private String callGeminiApiWithRetry(String promptText) {
         int attempt = 0;
         Exception lastException = null;
@@ -389,10 +468,9 @@ public class AIService {
                 int statusCode = e.getStatusCode().value();
                 lastException = e;
 
-                // Retry transient 5xx errors (503, 500, 502, etc.)
                 if (statusCode >= 500 && statusCode < 600) {
                     if (attempt < MAX_RETRY_ATTEMPTS) {
-                        long backoffMs = INITIAL_BACKOFF_MS * (1L << (attempt - 1)); // 1s, 2s, 4s
+                        long backoffMs = INITIAL_BACKOFF_MS * (1L << (attempt - 1));
                         log.warn("Gemini API returned {} on attempt {}/{}. Retrying in {}ms.",
                                 statusCode, attempt, MAX_RETRY_ATTEMPTS, backoffMs);
                         try {
@@ -410,7 +488,6 @@ public class AIService {
                     throw e;
                 }
             } catch (HttpClientErrorException e) {
-                // Never retry 4xx client errors
                 throw e;
             }
         }
@@ -424,9 +501,6 @@ public class AIService {
         throw new RuntimeException("Gemini API call failed");
     }
 
-    /**
-     * Calls the Gemini REST API and returns the generated text.
-     */
     @SuppressWarnings("unchecked")
     private String callGeminiApi(String promptText) {
         String url = GEMINI_API_URL + "?key=" + geminiApiKey;
@@ -442,10 +516,9 @@ public class AIService {
 
         requestBody.put("contents", List.of(content));
 
-        // Generation config — keep responses focused and short
         Map<String, Object> generationConfig = new HashMap<>();
         generationConfig.put("maxOutputTokens", 400);
-        generationConfig.put("temperature", 0.3); // Lower temperature = more factual
+        generationConfig.put("temperature", 0.2);
         requestBody.put("generationConfig", generationConfig);
 
         HttpHeaders headers = new HttpHeaders();
@@ -460,7 +533,6 @@ public class AIService {
             throw new RuntimeException("Gemini API returned non-OK status: " + response.getStatusCode());
         }
 
-        // Parse response: candidates[0].content.parts[0].text
         try {
             List<Map<String, Object>> candidates =
                     (List<Map<String, Object>>) response.getBody().get("candidates");
@@ -474,30 +546,6 @@ public class AIService {
         }
     }
 
-    // ───────────────────────────────────────────────────────────────────────
-    // Response builders
-    // ───────────────────────────────────────────────────────────────────────
-
-    /**
-     * Builds a full profile response with a safe public snapshot but no AI text,
-     * only an error message. Used when Gemini is unavailable but the user was found.
-     */
-    private AIProfileResponse buildProfileWithError(User user, boolean isCoach,
-                                                    String organizationName,
-                                                    List<String> achievements,
-                                                    String category, String specialization,
-                                                    String errorMessage) {
-        AIProfileResponse r = buildProfileResponse(user, isCoach, organizationName,
-                achievements, category, specialization, null);
-        r.setError(errorMessage);
-        return r;
-    }
-
-    /**
-     * Assembles the AIProfileResponse from a User entity.
-     * ONLY safe, public fields are included — email, password, authId,
-     * and dateOfBirth are deliberately excluded.
-     */
     private AIProfileResponse buildProfileResponse(User user, boolean isCoach,
                                                    String organizationName,
                                                    List<String> achievements,
@@ -518,37 +566,15 @@ public class AIService {
                 .bio(user.getBio())
                 .profileImageUrl(user.getProfileImageUrl())
                 .organizationName(organizationName)
-                // Coach-specific — experience only if stored
                 .experience(isCoach && notBlank(user.getExperience()) ? user.getExperience() : null)
-                // Achievement-derived fields
                 .achievements(achievements)
                 .category(category)
                 .specialization(specialization)
-                // AI content
                 .aiSummary(aiSummary)
                 .build();
     }
 
-    // ── Utility helpers ─────────────────────────────────────────────────────
-
-    private static String nullSafe(String s) {
-        return s != null ? s : "";
-    }
-
     private boolean notBlank(String s) {
         return s != null && !s.isBlank();
-    }
-
-    /**
-     * Sanitizes error response body to prevent logging of sensitive information.
-     */
-    private String sanitizeErrorBody(String body) {
-        if (body == null || body.isBlank()) {
-            return "[empty response]";
-        }
-        if (body.length() > 500) {
-            return body.substring(0, 500) + "... [truncated]";
-        }
-        return body;
     }
 }
